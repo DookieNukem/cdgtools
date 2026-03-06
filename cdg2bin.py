@@ -289,63 +289,44 @@ def generate_q_subchannel(track_num, index, abs_frame, rel_frame):
     return bytes(q_data)
 
 
-def interleave_subchannel(cdg_data, q_data):
-    """Interleave P, Q, and R-W subchannel data into 96 bytes.
+def add_pq_subchannel(cdg_data, q_data):
+    """Add P and Q subchannel bits to CDG data.
     
-    CDG data is in the R-W subchannels (6 subchannels * 96 bits each).
-    Standard .cdg files contain 24-byte packets, 4 packets per frame = 96 bytes.
-    This data goes into the R-W subchannels.
+    .cdg files contain 96 bytes per frame where each byte has the R-W subchannel
+    bits in the lower 6 bits, and the P/Q bits (upper 2 bits) are zeroed.
     
-    P subchannel: 12 bytes (all zeros for data tracks)
-    Q subchannel: 12 bytes (timing/track info)
-    R-W subchannels: 72 bytes (CDG graphics data - 6 channels * 12 bytes)
+    This function generates proper P and Q subchannel data and ORs it into
+    the CDG data without destroying the R-W subchannel information.
     
-    Returns 96 bytes of properly interleaved subchannel data.
+    In CD subchannel format, each of the 96 bytes contains 1 bit from each of
+    the 8 subchannels (P, Q, R, S, T, U, V, W):
+    Bit 7 (0x80): P subchannel bit
+    Bit 6 (0x40): Q subchannel bit  
+    Bits 5-0 (0x3F): R-W subchannel bits (already in CDG data)
+    
+    Returns 96 bytes with P/Q bits properly set.
     """
-    # P subchannel - all zeros for audio/data tracks
-    p_data = bytes(12)
+    result = bytearray(cdg_data)  # Start with CDG data (R-W bits)
     
-    # For cooked RW mode, cdrdao expects the subchannel data organized as:
-    # 96 bytes with P, Q, R, S, T, U, V, W interleaved
-    # However, .cdg files already contain the R-W data pre-formatted as 96 bytes
-    # We need to check if we should inject P/Q or if cdg_data is already complete
+    # P subchannel is all zeros for audio tracks (no pause)
+    # Q subchannel contains timing/track info (12 bytes = 96 bits)
     
-    # If the CDG data is already 96 bytes, it likely already contains all subchannels
-    # In this case, we need to replace/overlay the P and Q subchannel portions
+    # Each byte in q_data contributes 8 bits to the Q subchannel
+    # These bits need to be distributed across the 96 bytes
+    for byte_idx in range(12):  # 12 bytes of Q data
+        q_byte = q_data[byte_idx]
+        for bit_idx in range(8):  # 8 bits per byte
+            # Calculate which of the 96 bytes this bit goes into
+            subchannel_byte_idx = byte_idx * 8 + bit_idx
+            # Extract the bit from Q data
+            q_bit = (q_byte >> (7 - bit_idx)) & 0x01
+            # Set bit 6 (Q subchannel) in the result
+            if q_bit:
+                result[subchannel_byte_idx] |= 0x40
     
-    if len(cdg_data) == 96:
-        # CDG format stores data differently - it's 4 packets of 24 bytes each
-        # These 96 bytes go into R-W subchannels
-        # We need to create a proper 96-byte subchannel block
-        
-        # Standard subchannel interleaving: each subchannel contributes every 8th byte
-        result = [0] * 96
-        
-        # P subchannel: bytes 0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88
-        for i in range(12):
-            result[i * 8] = p_data[i]
-        
-        # Q subchannel: bytes 1, 9, 17, 25, 33, 41, 49, 57, 65, 73, 81, 89
-        for i in range(12):
-            result[i * 8 + 1] = q_data[i]
-        
-        # R-W subchannels: The remaining 6 bytes in each group of 8
-        # Standard .cdg files need to be distributed across R, S, T, U, V, W
-        # For simplicity, we'll put CDG data in R-W and zero the rest if needed
-        
-        # Actually, for CDG data, the 96 bytes are typically pre-formatted for R-W
-        # We should preserve the CDG data and just inject P and Q
-        cdg_bytes = list(cdg_data)
-        
-        # Copy CDG data, then overlay P and Q
-        for i in range(96):
-            if i % 8 not in [0, 1]:  # Not P or Q position
-                result[i] = cdg_bytes[i]
-        
-        return bytes(result)
-    else:
-        # Fallback: just append P and Q (though this is not standard)
-        return p_data + q_data + cdg_data[:72]
+    # P subchannel stays 0 (bit 7) for audio tracks
+    
+    return bytes(result)
 
 
 def produce_bin(raw, cdg, binfile, rawbin=0, track_num=1, track_offset=0):
@@ -389,14 +370,19 @@ def produce_bin(raw, cdg, binfile, rawbin=0, track_num=1, track_offset=0):
             pcm = pad_data(pcm, 2352)
             stop = 1
         if len(pcm) and len(cdg_data):
-            # Write PCM audio followed by CDG subchannel data
-            # Note: .cdg files contain 96 bytes of R-W subchannel data per frame
-            # For cdrdao "RW" mode, this is written directly without P/Q interleaving
+            # Generate Q subchannel data for this frame
+            abs_frame = track_offset + rel_frame
+            q_data = generate_q_subchannel(track_num, 1, abs_frame, rel_frame)
+            
+            # Add P and Q bits to the CDG data (which has R-W bits)
+            subchannel = add_pq_subchannel(cdg_data, q_data)
+            
+            # Write PCM audio followed by complete subchannel data
             binfile.write(pcm)
-            binfile.write(cdg_data)
+            binfile.write(subchannel)
             
             frames += 1
-            byte_count += (len(pcm) + len(cdg_data))
+            byte_count += (len(pcm) + len(subchannel))
             rel_frame += 1
             
             if stop:

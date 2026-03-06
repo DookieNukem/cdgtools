@@ -308,9 +308,12 @@ def add_pq_subchannel(cdg_data, q_data):
     """
     result = bytearray(cdg_data)  # Start with CDG data (R-W bits)
     
-    # P subchannel is all zeros for audio tracks (no pause)
-    # Q subchannel contains timing/track info (12 bytes = 96 bits)
+    # P subchannel should be 1 (0x80) for all audio track data
+    # Set P bit for all 96 bytes
+    for i in range(96):
+        result[i] |= 0x80
     
+    # Q subchannel contains timing/track info (12 bytes = 96 bits)
     # Each byte in q_data contributes 8 bits to the Q subchannel
     # These bits need to be distributed across the 96 bytes
     for byte_idx in range(12):  # 12 bytes of Q data
@@ -323,8 +326,6 @@ def add_pq_subchannel(cdg_data, q_data):
             # Set bit 6 (Q subchannel) in the result
             if q_bit:
                 result[subchannel_byte_idx] |= 0x40
-    
-    # P subchannel stays 0 (bit 7) for audio tracks
     
     return bytes(result)
 
@@ -370,15 +371,20 @@ def produce_bin(raw, cdg, binfile, rawbin=0, track_num=1, track_offset=0):
             pcm = pad_data(pcm, 2352)
             stop = 1
         if len(pcm) and len(cdg_data):
-            # Write PCM audio followed by CDG subchannel data
-            # .cdg files contain 96 bytes of R-W subchannel data per frame
-            # with P and Q bits already masked out (0x3F)
-            # Writing them directly as-is for cdrdao RW cooked mode
+            # Generate Q subchannel data for this frame
+            abs_frame = track_offset + rel_frame
+            q_data = generate_q_subchannel(track_num, 1, abs_frame, rel_frame)
+            
+            # Add P and Q bits to the CDG data (which has R-W bits)
+            # P bit is set to 1 for audio data, Q contains timing info
+            subchannel = add_pq_subchannel(cdg_data, q_data)
+            
+            # Write PCM audio followed by complete subchannel data
             binfile.write(pcm)
-            binfile.write(cdg_data)
+            binfile.write(subchannel)
             
             frames += 1
-            byte_count += (len(pcm) + len(cdg_data))
+            byte_count += (len(pcm) + len(subchannel))
             rel_frame += 1
             
             if stop:

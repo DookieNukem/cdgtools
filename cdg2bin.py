@@ -377,7 +377,7 @@ def produce_bin(raw, cdg, binfile, rawbin=0, track_num=1, track_offset=0):
 
     # Now that everything's opened, we start interleaving the data.
     frames = 0
-    bytes = 0
+    byte_count = 0
     stop = 0
     rel_frame = 0  # Frame position relative to track start
 
@@ -401,7 +401,7 @@ def produce_bin(raw, cdg, binfile, rawbin=0, track_num=1, track_offset=0):
             binfile.write(subchannel)
             
             frames += 1
-            bytes += (len(pcm) + len(subchannel))
+            byte_count += (len(pcm) + len(subchannel))
             rel_frame += 1
             
             if stop:
@@ -412,7 +412,7 @@ def produce_bin(raw, cdg, binfile, rawbin=0, track_num=1, track_offset=0):
 
     rawaudio.close()
     rawcdg.close()
-    return (frames, bytes)
+    return (frames, byte_count)
 
 
 def calctime(frames):
@@ -433,7 +433,7 @@ def tocblock(filename, track, offset, frames, raw=0):
 	whether it is cooked or raw (raw = 0 for cooked, raw = 1 for raw)."""
 
     # There are 2352 audio bytes and 96 CDG bytes in every frame.
-    bytes = frames * (2352 + 96)
+    byte_count = frames * (2352 + 96)
 
     time = calctime(frames)
 
@@ -448,7 +448,7 @@ def tocblock(filename, track, offset, frames, raw=0):
         offset = ''
 
     string = '\n// Track %d\nTRACK AUDIO %s\nNO COPY\nNO PRE_EMPHASIS\nTWO_CHANNEL_AUDIO\nDATAFILE "%s" %s%s // length in bytes: %d\n' % (
-        track, raw, filename, offset, time, bytes)
+        track, raw, filename, offset, time, byte_count)
 
     return string
 
@@ -491,7 +491,7 @@ toc = ''
 index = ''
 
 # Nothing's written yet
-bytes = 0
+byte_count = 0
 offset = 0
 totframes = 0
 
@@ -526,7 +526,7 @@ for file in args:
             track_offset = totframes
 
         # Encode the CDG and audio data with proper P/Q subchannel generation
-        (frames, bytes) = produce_bin(audio, cdg, bin, options.raw, track, track_offset)
+        (frames, byte_count) = produce_bin(audio, cdg, bin, options.raw, track, track_offset)
 
         # We created the raw audio file, but now we're done with it
         os.unlink(audio)
@@ -537,7 +537,7 @@ for file in args:
 
         # Add to the cue sheet
         toc += tocblock(bin.name, track, offset, frames, options.raw)
-        offset += bytes
+        offset += byte_count
         totframes += frames
 
         if options.split:

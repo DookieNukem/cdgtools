@@ -389,19 +389,14 @@ def produce_bin(raw, cdg, binfile, rawbin=0, track_num=1, track_offset=0):
             pcm = pad_data(pcm, 2352)
             stop = 1
         if len(pcm) and len(cdg_data):
-            # Generate Q subchannel data for this frame
-            abs_frame = track_offset + rel_frame
-            q_data = generate_q_subchannel(track_num, 1, abs_frame, rel_frame)
-            
-            # Interleave P, Q, and CDG (R-W) subchannel data
-            subchannel = interleave_subchannel(cdg_data, q_data)
-            
-            # Write PCM audio followed by complete subchannel data
+            # Write PCM audio followed by CDG subchannel data
+            # Note: .cdg files contain 96 bytes of R-W subchannel data per frame
+            # For cdrdao "RW" mode, this is written directly without P/Q interleaving
             binfile.write(pcm)
-            binfile.write(subchannel)
+            binfile.write(cdg_data)
             
             frames += 1
-            byte_count += (len(pcm) + len(subchannel))
+            byte_count += (len(pcm) + len(cdg_data))
             rel_frame += 1
             
             if stop:

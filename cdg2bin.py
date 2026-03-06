@@ -47,6 +47,10 @@ def findmatch(file):
     basename = os.path.basename(file)
     basename_no_ext = basename[:-3]
     dirname = os.path.dirname(file)
+    
+    # If no directory specified, use current directory
+    if not dirname:
+        dirname = '.'
 
     audio_file = None
     cdg_file = None

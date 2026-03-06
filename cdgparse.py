@@ -95,7 +95,7 @@ def bin2cdg (binfilename, start_offset, binsize):
 		if chunksize > 0:
 			# Mask out the PQ data, only returning the R-W channels
 			for unmasked in chunk:
-				byte = struct.unpack("b", unmasked)[0]
+				byte = unmasked if isinstance(unmasked, int) else struct.unpack("b", bytes([unmasked]))[0]
 				byte = byte & 0x3F
 				masked = struct.pack("b", byte)
 				_cdgdata.append(masked)
@@ -110,7 +110,7 @@ def bin2cdg (binfilename, start_offset, binsize):
 def Deinterleave (cdgdata):
 
 	# Skip the last two sectors as we don't have the upcoming spread bytes
-	sectors = (len(cdgdata) / 96) - 2
+	sectors = (len(cdgdata) // 96) - 2
 	deinterleavedData = []
 
 	# Swap the byte positions to deinterleave the data
@@ -120,7 +120,7 @@ def Deinterleave (cdgdata):
 				try:
 					deinterleavedData.append(cdgdata[(sector * 96) + (pack * 24) + offsets[column]])
 				except:
-					print ("ERROR: Sector %d, Pack %d, column %d" % (sector, pack, column))
+					print("ERROR: Sector %d, Pack %d, column %d" % (sector, pack, column))
 
 	return (deinterleavedData)
 

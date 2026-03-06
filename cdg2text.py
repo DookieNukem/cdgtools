@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 # cdg2text - cdgtools: CDG to textual representation
 
@@ -123,27 +123,27 @@ class cdgPlayer:
 		packd={}
 		packet = self.cdgFile.read(24)
 		if (len(packet) == 24):
-			packd['command']=struct.unpack('B', packet[0])[0]
-			packd['instruction']=struct.unpack('B', packet[1])[0]
+			packd['command']=struct.unpack('B', bytes([packet[0]]))[0]
+			packd['instruction']=struct.unpack('B', bytes([packet[1]]))[0]
 			packd['parityQ']=struct.unpack('2B', packet[2:4])[0:2]
 			packd['data']=struct.unpack('16B', packet[4:20])[0:16]
 			packd['parity']=struct.unpack('4B', packet[20:24])[0:4]
 			return packd
 		elif (len(packet) > 0):
-			print ("Didnt read 24 bytes")
+			print("Didnt read 24 bytes")
 			return None
 
 	# Set the preset colour
 	def cdgMemoryPreset (self, packd):
 		colour = packd['data'][0] & 0x0F
 		repeat = packd['data'][1] & 0x0F
-		print ("cdgMemoryPreset [Colour=%d, Repeat=%d]" % (colour, repeat))
+		print("cdgMemoryPreset [Colour=%d, Repeat=%d]" % (colour, repeat))
 		return
 
 	# Set the border colour
 	def cdgBorderPreset (self, packd):
 		colour = packd['data'][0] & 0x0F
-		print ("cdgMemoryPreset [Colour=%d]" % colour)
+		print("cdgMemoryPreset [Colour=%d]" % colour)
 		return
 
 	# CDG Scroll Command - Set the scrolled in area with a fresh colour
@@ -174,7 +174,7 @@ class cdgPlayer:
 		else:
 			typeStr = "cdgScrollPreset"
 
-		print ("%s [colour=%d, hScroll=%d, vScroll=%d]" % (typeStr, colour, hScroll, vScroll))
+		print("%s [colour=%d, hScroll=%d, vScroll=%d]" % (typeStr, colour, hScroll, vScroll))
 		return
 	
 	# Set the colours for a 12x6 tile. The main CDG command for display data
@@ -191,7 +191,7 @@ class cdgPlayer:
 		else:
 			typeStr = "cdgTileBlockNormal"
 
-		print ("%s [Colour0=%d, Colour1=%d, ColIndex=%d, RowIndex=%d]"
+		print("%s [Colour0=%d, Colour1=%d, ColIndex=%d, RowIndex=%d]"
 			 	% (typeStr, colour0, colour1, column_index, row_index))
 		return
 
@@ -199,27 +199,27 @@ class cdgPlayer:
 	def cdgDefineTransparentColour (self, packd):
 		data_block = packd['data']
 		colour = data_block[0] & 0x0F
-		print ("cdgDefineTransparentColour [Colour=%d]" % colour)
+		print("cdgDefineTransparentColour [Colour=%d]" % colour)
 		return
 
 	# Load the RGB value for colours 0..7 or 8..15 in the lookup table
 	def cdgLoadColourTableCommon (self, packd, table):
 		if table == 0:
 			colourTableStart = 0
-			print ("cdgLoadColourTable0..7")
+			print("cdgLoadColourTable0..7")
 		else:
 			colourTableStart = 8
-			print ("cdgLoadColourTable8..15")
+			print("cdgLoadColourTable8..15")
 		for i in range(8):
 			colourEntry = ((packd['data'][2 * i] & CDG_MASK) << 8)
 			colourEntry = colourEntry + (packd['data'][(2 * i) + 1] & CDG_MASK)
 			colourEntry = ((colourEntry & 0x3F00) >> 2) | (colourEntry & 0x003F)
-			print ("  Colour %d = 0x%X" % ((i + colourTableStart), colourEntry))
+			print("  Colour %d = 0x%X" % ((i + colourTableStart), colourEntry))
 		return
 
 # Print out some instructions on error
 def usage():
-    print "Usage:  %s <CDG filename>" % os.path.basename(sys.argv[0])
+    print("Usage:  %s <CDG filename>" % os.path.basename(sys.argv[0]))
 
 # Can be called from the command line with the CDG filepath as parameter
 def main():

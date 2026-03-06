@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 # cdgtools - cdgtools: Common library module and GUI starter
 #
@@ -40,10 +40,10 @@ VERSION_STRING = "0.3.2"
 # Compute CD track MSFs from their start offsets in bytes.
 def ComputeMSF (byteOffset):
 	# Include the 150 frame (2 second) pregap
-	totalframes = (byteOffset / 2448) + 150
-	totalsecs =  totalframes / 75
+	totalframes = (byteOffset // 2448) + 150
+	totalsecs =  totalframes // 75
 	# Calculate the MSF
-	minutes = totalsecs / 60
+	minutes = totalsecs // 60
 	seconds = totalsecs % 60
 	frames = totalframes % 75
 	return (minutes, seconds, frames)

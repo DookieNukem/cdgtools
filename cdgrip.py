@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 # cdgrip - cdgtools: CD+G Ripper
 
@@ -209,7 +209,7 @@ def cdgrip(tocfilename, delete_bin_toc=False, with_cddb=False, verbose=False):
 			trackNames = []
 			for i in range(numTracks):
 				# Create the track name, remove any slashes
-				trackname = "%.02d - %s" % ((i + 1), cddbDict['TTITLE' + `i`])
+				trackname = "%.02d - %s" % ((i + 1), cddbDict['TTITLE' + str(i)])
 				trackname = trackname.replace ("/", "-")
 				trackname = trackname.replace ("\\", "-")
 				trackNames.append(trackname)
@@ -303,7 +303,7 @@ def main():
 		opts, args = getopt.getopt(sys.argv[1:], "hv", ["delete-bin-toc", "help", "with-cddb"])
 	except getopt.GetoptError:
 		usage()
- 		sys.exit(2)
+		sys.exit(2)
 
 	# Check the user passed in the tocfile
 	if len(args) != 1:
@@ -319,7 +319,7 @@ def main():
 
 	# Parse the command-line options   
 	for opt, arg in opts:
- 		if opt in ("-h", "--help"):
+		if opt in ("-h", "--help"):
 			usage()
 			sys.exit()
 		if opt == "-v":

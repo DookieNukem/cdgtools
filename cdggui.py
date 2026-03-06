@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 # cdggui - cdgtools: CD+G Ripper GUI
 #
@@ -409,7 +409,7 @@ class cdgtoolsWindow(wx.Frame):
 		cont = Dlg.Update(progress, label)
 
 		# Handle both types of return value from Update() 
-		if isinstance(cont, types.TupleType):
+		if isinstance(cont, tuple):
 			# Later versions of wxPython return a tuple from the above.
 			cont, skip = cont
 

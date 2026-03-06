@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 # cdgcddb - cdgtools: CDDB module
 
@@ -31,7 +31,7 @@
 
 
 # Required for the http/cddb protocol
-import urllib
+import urllib.request
 
 # Required for getting the user/hostname needed for CDDB
 import getpass, socket
@@ -47,7 +47,7 @@ def cddbSum ( n ):
 	ret = 0
 	while (n > 0):
 		ret = ret + (n % 10)
-		n = n / 10
+		n = n // 10
 	return (ret)
 
 def cddbQuery ( trackStartMins, trackStartSecs, trackStartFrames, leadoutStartMin, leadoutStartSec ):
@@ -65,7 +65,7 @@ def cddbQuery ( trackStartMins, trackStartSecs, trackStartFrames, leadoutStartMi
 	for i in range(tot_trks):
 		n = n + cddbSum((trackStartMins[i] * 60) + trackStartSecs[i])
 	t = ((leadoutStartMin * 60) + leadoutStartSec) - ((trackStartMins[0] * 60) + trackStartSecs[0])
-	discId = ((long(n) % 0xff) << 24 | long(t) << 8 | long(tot_trks))
+	discId = ((int(n) % 0xff) << 24 | int(t) << 8 | int(tot_trks))
 
 	# Build the CDDB query string
 	queryString = "%08x+%d" % (discId, tot_trks)
@@ -78,9 +78,9 @@ def cddbQuery ( trackStartMins, trackStartSecs, trackStartFrames, leadoutStartMi
 				(CDDB_SERVER, queryString, username, hostname, CLIENT_NAME, CLIENT_VER, CLIENT_PROTO))
 
 	# The hello handshake
-	queryResponse = urllib.urlopen (fullString)
+	queryResponse = urllib.request.urlopen(fullString)
 	responseData = queryResponse.readlines()
-	response = responseData[0].split()
+	response = responseData[0].decode('utf-8').split()
 	
 	# Check the error code
 	matchFound = False
@@ -114,14 +114,15 @@ def cddbQuery ( trackStartMins, trackStartSecs, trackStartFrames, leadoutStartMi
 		fullString = ("%s?cmd=cddb+read+%s+%s&hello=%s+%s+%s+%s&proto=%d" %
 					(CDDB_SERVER, infoDict['CATEG'], infoDict['DISCID'], 
 					username, hostname, CLIENT_NAME, CLIENT_VER, CLIENT_PROTO))
-		readResponse = urllib.urlopen (fullString)
+		readResponse = urllib.request.urlopen(fullString)
 		responseData = readResponse.readlines()
-		response = responseData[0].split()
+		response = responseData[0].decode('utf-8').split()
 
 		# Parse the response for a match/errors
 		if response[0] == "210":
 			# Match found. Fill the dictionary with the returned details
 			for line in responseData[1:]:
+				line = line.decode('utf-8')
 				# Read all non-comment (#) lines out and stop at the terminator (.)
 				if line[0] == '.':
 					break

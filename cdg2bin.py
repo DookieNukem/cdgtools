@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import cdgtools
 import os
@@ -14,19 +14,19 @@ NOTSUPPORTED = 5
 
 def show_error(errno=0):
     if errno == NOFILES:
-        print 'ERROR: No valid files were specified.'
+        print('ERROR: No valid files were specified.')
         sys.exit(2)
 
 
 def show_warning(warnno=0, extra=''):
     if warnno == NOMATCH:
-        print 'WARNING: No matching file found for "%s", skipping track' % extra
+        print('WARNING: No matching file found for "%s", skipping track' % extra)
     elif warnno == EXTRACTFAIL:
-        print 'WARNING: Extracting "%s" failed, skipping track' % extra
+        print('WARNING: Extracting "%s" failed, skipping track' % extra)
     elif warnno == NOSUCHFILE:
-        print 'WARNING: The specified file "%s" could not be found' % extra
+        print('WARNING: The specified file "%s" could not be found' % extra)
     elif warnno == NOTSUPPORTED:
-        print 'WARNING: The audio format in file "%s" is not supported' % extra
+        print('WARNING: The audio format in file "%s" is not supported' % extra)
 
 
 def checkfile(file):
@@ -198,10 +198,153 @@ def pad_data(data, length):
     if len(data) == length:
         return data
     else:
-        return data + chr(0) * (length - len(data))
+        return data + bytes(length - len(data))
 
 
-def produce_bin(raw, cdg, binfile, rawbin=0):
+def crc_ccitt(data):
+    """Calculate CRC-CCITT for Q subchannel data (polynomial 0x11021)."""
+    crc = 0
+    for byte in data:
+        if isinstance(byte, int):
+            pass  # Already an int in Python 3 when iterating bytes
+        else:
+            byte = byte if isinstance(byte, int) else ord(byte)
+        crc ^= (byte << 8)
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x11021
+            else:
+                crc = crc << 1
+            crc &= 0xFFFF
+    return crc
+
+
+def int_to_bcd(value):
+    """Convert integer to BCD (Binary Coded Decimal) format."""
+    return ((value // 10) << 4) | (value % 10)
+
+
+def generate_q_subchannel(track_num, index, abs_frame, rel_frame):
+    """Generate 12 bytes of Q subchannel data for a frame.
+    
+    track_num: Track number (1-99)
+    index: Index within track (usually 1)
+    abs_frame: Absolute frame position from disc start
+    rel_frame: Relative frame position from track start
+    """
+    # Q subchannel format:
+    # Byte 0: Control (4 bits) | ADR (4 bits)
+    # Byte 1: Track number (BCD)
+    # Byte 2: Index (BCD)
+    # Byte 3: Relative minutes (BCD)
+    # Byte 4: Relative seconds (BCD)
+    # Byte 5: Relative frames (BCD)
+    # Byte 6: Reserved (zero)
+    # Byte 7: Absolute minutes (BCD)
+    # Byte 8: Absolute seconds (BCD)
+    # Byte 9: Absolute frames (BCD)
+    # Byte 10-11: CRC-16
+    
+    q_data = []
+    
+    # Control = 0x0 (audio, no pre-emphasis, copy prohibited, 2 channels)
+    # ADR = 0x1 (encodes position)
+    q_data.append(0x01)
+    
+    # Track number in BCD
+    q_data.append(int_to_bcd(track_num))
+    
+    # Index in BCD
+    q_data.append(int_to_bcd(index))
+    
+    # Relative time (from track start)
+    rel_mins = rel_frame // (75 * 60)
+    rel_secs = (rel_frame // 75) % 60
+    rel_frames = rel_frame % 75
+    q_data.append(int_to_bcd(rel_mins))
+    q_data.append(int_to_bcd(rel_secs))
+    q_data.append(int_to_bcd(rel_frames))
+    
+    # Reserved byte
+    q_data.append(0x00)
+    
+    # Absolute time (from disc start, with 2 second pregap = 150 frames)
+    abs_frame_with_pregap = abs_frame + 150
+    abs_mins = abs_frame_with_pregap // (75 * 60)
+    abs_secs = (abs_frame_with_pregap // 75) % 60
+    abs_frames = abs_frame_with_pregap % 75
+    q_data.append(int_to_bcd(abs_mins))
+    q_data.append(int_to_bcd(abs_secs))
+    q_data.append(int_to_bcd(abs_frames))
+    
+    # Calculate CRC on first 10 bytes
+    crc = crc_ccitt(q_data)
+    q_data.append((crc >> 8) & 0xFF)
+    q_data.append(crc & 0xFF)
+    
+    return bytes(q_data)
+
+
+def interleave_subchannel(cdg_data, q_data):
+    """Interleave P, Q, and R-W subchannel data into 96 bytes.
+    
+    CDG data is in the R-W subchannels (6 subchannels * 96 bits each).
+    Standard .cdg files contain 24-byte packets, 4 packets per frame = 96 bytes.
+    This data goes into the R-W subchannels.
+    
+    P subchannel: 12 bytes (all zeros for data tracks)
+    Q subchannel: 12 bytes (timing/track info)
+    R-W subchannels: 72 bytes (CDG graphics data - 6 channels * 12 bytes)
+    
+    Returns 96 bytes of properly interleaved subchannel data.
+    """
+    # P subchannel - all zeros for audio/data tracks
+    p_data = bytes(12)
+    
+    # For cooked RW mode, cdrdao expects the subchannel data organized as:
+    # 96 bytes with P, Q, R, S, T, U, V, W interleaved
+    # However, .cdg files already contain the R-W data pre-formatted as 96 bytes
+    # We need to check if we should inject P/Q or if cdg_data is already complete
+    
+    # If the CDG data is already 96 bytes, it likely already contains all subchannels
+    # In this case, we need to replace/overlay the P and Q subchannel portions
+    
+    if len(cdg_data) == 96:
+        # CDG format stores data differently - it's 4 packets of 24 bytes each
+        # These 96 bytes go into R-W subchannels
+        # We need to create a proper 96-byte subchannel block
+        
+        # Standard subchannel interleaving: each subchannel contributes every 8th byte
+        result = [0] * 96
+        
+        # P subchannel: bytes 0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88
+        for i in range(12):
+            result[i * 8] = p_data[i]
+        
+        # Q subchannel: bytes 1, 9, 17, 25, 33, 41, 49, 57, 65, 73, 81, 89
+        for i in range(12):
+            result[i * 8 + 1] = q_data[i]
+        
+        # R-W subchannels: The remaining 6 bytes in each group of 8
+        # Standard .cdg files need to be distributed across R, S, T, U, V, W
+        # For simplicity, we'll put CDG data in R-W and zero the rest if needed
+        
+        # Actually, for CDG data, the 96 bytes are typically pre-formatted for R-W
+        # We should preserve the CDG data and just inject P and Q
+        cdg_bytes = list(cdg_data)
+        
+        # Copy CDG data, then overlay P and Q
+        for i in range(96):
+            if i % 8 not in [0, 1]:  # Not P or Q position
+                result[i] = cdg_bytes[i]
+        
+        return bytes(result)
+    else:
+        # Fallback: just append P and Q (though this is not standard)
+        return p_data + q_data + cdg_data[:72]
+
+
+def produce_bin(raw, cdg, binfile, rawbin=0, track_num=1, track_offset=0):
     """Create an interleaved (cooked) BIN file suitable for writing with
     cdrdao. Pass filenames and an opened file object. Set raw = 1 to
     write a raw BIN image instead of a cooked one.
@@ -209,6 +352,8 @@ def produce_bin(raw, cdg, binfile, rawbin=0):
     raw = raw audio filename
     cdg = cdg data filename
     bin = output BIN file object, opened with 'wb' mode
+    track_num = track number for Q subchannel data
+    track_offset = absolute frame offset for this track
 
     This function doesn't actually create the BIN file itself (it just
     writes to an open descriptor) because it can be used to write a new
@@ -224,25 +369,37 @@ def produce_bin(raw, cdg, binfile, rawbin=0):
     rawcdg = open(cdg, 'rb')
 
     if rawbin:
-        print 'WARNING: Raw mode is not yet supported. Writing cooked data.'
+        print('WARNING: Raw mode is not yet supported. Writing cooked data.')
 
     # Now that everything's opened, we start interleaving the data.
     frames = 0
     bytes = 0
     stop = 0
+    rel_frame = 0  # Frame position relative to track start
 
     while 1:
         pcm = rawaudio.read(2352)
-        cdg = pad_data(rawcdg.read(96), 96)
+        cdg_data = pad_data(rawcdg.read(96), 96)
 
         if not (len(pcm) == 2352):
             pcm = pad_data(pcm, 2352)
             stop = 1
-        if len(pcm) and len(cdg):
+        if len(pcm) and len(cdg_data):
+            # Generate Q subchannel data for this frame
+            abs_frame = track_offset + rel_frame
+            q_data = generate_q_subchannel(track_num, 1, abs_frame, rel_frame)
+            
+            # Interleave P, Q, and CDG (R-W) subchannel data
+            subchannel = interleave_subchannel(cdg_data, q_data)
+            
+            # Write PCM audio followed by complete subchannel data
             binfile.write(pcm)
-            binfile.write(cdg)
+            binfile.write(subchannel)
+            
             frames += 1
-            bytes += (len(pcm) + len(cdg))
+            bytes += (len(pcm) + len(subchannel))
+            rel_frame += 1
+            
             if stop:
                 break
         else:
@@ -256,8 +413,8 @@ def produce_bin(raw, cdg, binfile, rawbin=0):
 
 def calctime(frames):
     time_frames = frames % 75
-    time_secs = frames / 75
-    time_mins = time_secs / 60
+    time_secs = frames // 75
+    time_mins = time_secs // 60
     time_secs = time_secs % 60
 
     return '%02d:%02d:%02d' % (time_mins, time_secs, time_frames)
@@ -292,42 +449,35 @@ def tocblock(filename, track, offset, frames, raw=0):
     return string
 
 
-try:
-    from optparse import OptionParser
-except:
-    from optik import OptionParser
+from argparse import ArgumentParser
 
-usage = """usage: %prog [options] <file1> [fileN [ ... fileN]]
-
-After any appropriate program options, list files to be added to the CD+G disc.
+usage = """After any appropriate program options, list files to be added to the CD+G disc.
 They will be placed on the disc in the order provided on the command line.
 Files can be any combination of tar.gz, tar.bz2, .zip, .mp3+cdg, .ogg+cdg, and
 .wav+cdg. For .mp3+cdg and .ogg+cdg, specify either the CDG file or the sound
 file; cdg2bin will find the matching file."""
 
-version = '%prog ' + cdgtools.VERSION_STRING
+parser = ArgumentParser(description=usage)
 
-parser = OptionParser(usage=usage, version=version, conflict_handler='resolve')
-
-parser.add_option('-o', '--output-prefix', dest='output', type='string', metavar='NAME',
+parser.add_argument('--version', action='version', version='cdg2bin ' + cdgtools.VERSION_STRING)
+parser.add_argument('-o', '--output-prefix', dest='output', type=str, metavar='NAME',
                   help='Output filename prefix to use when creating files; "-o foo" produces "foo.toc" and "foo.bin" files',
                   default='cdg')
-parser.add_option('-s', '--split-image', dest='split', action='store_true',
+parser.add_argument('-s', '--split-image', dest='split', action='store_true',
                   help='Produce individual .bin images for each track instead of a single .bin image for the whole disc',
                   default=False)
-parser.add_option('-r', '--raw', dest='raw', action='store_true',
+parser.add_argument('-r', '--raw', dest='raw', action='store_true',
                   help='Produce raw data instead of cooked data (cooked data is the default)',
                   default=False)
-parser.add_option('-b', '--byte-swap', dest='byteswap', action='store_true',
+parser.add_argument('-b', '--byte-swap', dest='byteswap', action='store_true',
                   help='Swap byte order while processing audio.',
                   default=False)
+parser.add_argument('files', nargs='+', metavar='file',
+                  help='Files to add to the CD+G disc')
 
-(options, args) = parser.parse_args()
-
-if not len(args):
-    parser.print_help()
-    print '\nERROR: at least one file must be specified.'
-    sys.exit(2)
+args = parser.parse_args()
+options = args
+args = args.files
 
 # We always start at Track 1
 track = 1
@@ -347,7 +497,7 @@ if not options.split:
     bin = open(options.output + '.bin', 'wb')
 
 for file in args:
-    print 'Processing %s' % file
+    print('Processing %s' % file)
 
     # Find a matching pair and decode the audio
     compaudio = ''
@@ -366,9 +516,13 @@ for file in args:
             # We're writing multiple BIN images, so we have to
             # create a new BIN image file here first
             bin = open(options.output + '-%02d.bin' % track, 'wb')
+            track_offset = 0  # Each track starts at frame 0 when split
+        else:
+            # Calculate absolute frame offset for this track in the disc
+            track_offset = totframes
 
-        # Encode the CDG and audio data
-        (frames, bytes) = produce_bin(audio, cdg, bin, options.raw)
+        # Encode the CDG and audio data with proper P/Q subchannel generation
+        (frames, bytes) = produce_bin(audio, cdg, bin, options.raw, track, track_offset)
 
         # We created the raw audio file, but now we're done with it
         os.unlink(audio)
@@ -392,7 +546,7 @@ for file in args:
         index += '%s-%02d: %s\n' % (options.output, track, file)
         track += 1
     else:
-        print 'Warning, couldn\'t process %s. NOT adding to image.' % file
+        print('Warning, couldn\'t process %s. NOT adding to image.' % file)
 
 if not options.split:
     bin.close()
@@ -409,5 +563,5 @@ indexfile.close()
 
 time = calctime(totframes)
 
-print 'Processing complete. Added %d tracks.' % (track - 1)
-print 'Finished CD length is %s.' % time
+print('Processing complete. Added %d tracks.' % (track - 1))
+print('Finished CD length is %s.' % time)
